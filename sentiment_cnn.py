@@ -28,6 +28,8 @@ from keras.layers import Dense, Dropout, Flatten, Input, MaxPooling1D, Convoluti
 from keras.layers.merge import Concatenate
 from keras.datasets import imdb
 from keras.preprocessing import sequence
+import Dataload
+
 np.random.seed(0)
 
 # ---------------------- Parameters section -------------------
@@ -39,15 +41,15 @@ model_type = "CNN-non-static"  # CNN-rand|CNN-non-static|CNN-static
 data_source = "keras_data_set"  # keras_data_set|local_dir
 
 # Model Hyperparameters
-embedding_dim = 50
+embedding_dim = 300
 filter_sizes = (3, 8)
 num_filters = 10
 dropout_prob = (0.5, 0.8)
-hidden_dims = 50
+hidden_dims = 300
 
 # Training parameters
 batch_size = 64
-num_epochs = 10
+num_epochs = 1
 
 # Prepossessing parameters
 sequence_length = 400
@@ -61,52 +63,23 @@ context = 10
 # ---------------------- Parameters end -----------------------
 
 
-def load_data(data_source):
-    assert data_source in ["keras_data_set", "local_dir"], "Unknown data source"
-    if data_source == "keras_data_set":
-        (x_train, y_train), (x_test, y_test) = imdb.load_data(num_words=max_words, start_char=None,
-                                                              oov_char=None, index_from=None)
 
-        x_train = sequence.pad_sequences(x_train, maxlen=sequence_length, padding="post", truncating="post")
-        x_test = sequence.pad_sequences(x_test, maxlen=sequence_length, padding="post", truncating="post")
-
-        vocabulary = imdb.get_word_index()
-        vocabulary_inv = dict((v, k) for k, v in vocabulary.items())
-        vocabulary_inv[0] = "<PAD/>"
-    else:
-        x, y, vocabulary, vocabulary_inv_list = data_helpers.load_data()
-        vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
-        y = y.argmax(axis=1)
-
-        # Shuffle data
-        shuffle_indices = np.random.permutation(np.arange(len(y)))
-        x = x[shuffle_indices]
-        y = y[shuffle_indices]
-        train_len = int(len(x) * 0.9)
-        x_train = x[:train_len]
-        y_train = y[:train_len]
-        x_test = x[train_len:]
-        y_test = y[train_len:]
-
-    return x_train, y_train, x_test, y_test, vocabulary_inv
-
-
-# Data Preparation
 print("Load data...")
-x_train, y_train, x_test, y_test, vocabulary_inv = load_data(data_source)
+x_train, y_train, x_val, y_val, x_test, y_test, vocabulary_inv = Dataload.getTrain()
 
 if sequence_length != x_test.shape[1]:
     print("Adjusting sequence length for actual size")
     sequence_length = x_test.shape[1]
 
 print("x_train shape:", x_train.shape)
+print("x_val shape:", x_val.shape)
 print("x_test shape:", x_test.shape)
 print("Vocabulary Size: {:d}".format(len(vocabulary_inv)))
 
 # Prepare embedding layer weights and convert inputs for static model
 print("Model type is", model_type)
 if model_type in ["CNN-non-static", "CNN-static"]:
-    embedding_weights = train_word2vec(np.vstack((x_train, x_test)), vocabulary_inv, num_features=embedding_dim,
+    embedding_weights = train_word2vec(np.vstack((x_train, x_val)), vocabulary_inv, num_features=embedding_dim,
                                        min_word_count=min_word_count, context=context)
     if model_type == "CNN-static":
         x_train = np.stack([np.stack([embedding_weights[word] for word in sentence]) for sentence in x_train])
@@ -149,7 +122,7 @@ for sz in filter_sizes:
 z = Concatenate()(conv_blocks) if len(conv_blocks) > 1 else conv_blocks[0]
 
 z = Dropout(dropout_prob[1])(z)
-z = Dense(hidden_dims, activation="relu")(z)
+z = Dense(hidden_dims, activation="relu", name="hidden_layer")(z)
 model_output = Dense(1, activation="sigmoid")(z)
 
 model = Model(model_input, model_output)
@@ -163,5 +136,29 @@ if model_type == "CNN-non-static":
     embedding_layer.set_weights([weights])
 
 # Train the model
+
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+
+
+dp = '/Users/royal/Desktop/CNN-for-Sentence-Classification-in-Keras/data/'
+call_backs = [EarlyStopping(monitor='val_loss', min_delta=0, patience=3, verbose=3),
+              ModelCheckpoint(filepath=dp+'weights.hdf5', verbose=1, save_best_only=True)]
+
 model.fit(x_train, y_train, batch_size=batch_size, epochs=num_epochs,
-          validation_data=(x_test, y_test), verbose=2)
+          validation_data=(x_val, y_val), verbose=2, callbacks=call_backs)
+
+
+
+intermediate_model = Model(inputs=[model.input], outputs=[model.get_layer("hidden_layer").output])
+
+
+encode_train = intermediate_model.predict(x_train)
+encode_dev  = intermediate_model.predict(x_val)
+encode_test = intermediate_model.predict(x_test)
+
+dataPath ='/Users/royal/Desktop/MyDeepMoji/DeepMoji/data/WikiPersonnalAttack/'
+
+
+np.save(dataPath+'cnn_train_x_encoding_personal_attack', encode_train)
+np.save(dataPath+'cnn_dev_x_encoding_personal_attack', encode_dev)
+np.save(dataPath+'cnn_test_x_encoding_personal_attack', encode_test)

@@ -50,19 +50,25 @@ def load_data_and_labels():
     return [x_text, y]
 
 
-def pad_sentences(sentences, padding_word="<PAD/>"):
+def pad_sentences(sentences, seq_len = -1, padding_word="<PAD/>"):
     """
     Pads all sentences to the same length. The length is defined by the longest sentence.
     Returns padded sentences.
     """
+
     sequence_length = max(len(x) for x in sentences)
+    if seq_len != -1:
+        sequence_length = seq_len
+
     padded_sentences = []
     for i in range(len(sentences)):
         sentence = sentences[i]
+        m = min(seq_len,len(sentence))
+        sentence  = sentence[:m]
         num_padding = sequence_length - len(sentence)
         new_sentence = sentence + [padding_word] * num_padding
         padded_sentences.append(new_sentence)
-    return padded_sentences
+    return padded_sentences, sequence_length
 
 
 def build_vocab(sentences):
@@ -78,12 +84,17 @@ def build_vocab(sentences):
     vocabulary = {x: i for i, x in enumerate(vocabulary_inv)}
     return [vocabulary, vocabulary_inv]
 
+def transformWord(word, vocab):
+    if word in vocab:
+        return word
+    return "<PAD/>"
+
 
 def build_input_data(sentences, labels, vocabulary):
     """
     Maps sentencs and labels to vectors based on a vocabulary.
     """
-    x = np.array([[vocabulary[word] for word in sentence] for sentence in sentences])
+    x = np.array([[vocabulary[transformWord(word, vocabulary)] for word in sentence] for sentence in sentences])
     y = np.array(labels)
     return [x, y]
 
@@ -95,10 +106,10 @@ def load_data():
     """
     # Load and preprocess data
     sentences, labels = load_data_and_labels()
-    sentences_padded = pad_sentences(sentences)
+    sentences_padded, seq_len = pad_sentences(sentences)
     vocabulary, vocabulary_inv = build_vocab(sentences_padded)
     x, y = build_input_data(sentences_padded, labels, vocabulary)
-    return [x, y, vocabulary, vocabulary_inv]
+    return [x, y, vocabulary, vocabulary_inv, seq_len]
 
 
 def batch_iter(data, batch_size, num_epochs):
